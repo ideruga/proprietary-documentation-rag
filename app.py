@@ -3,6 +3,8 @@ import os
 from flask import Flask, render_template, request, jsonify
 from langchain.chains import ConversationalRetrievalChain
 from langchain.llms import OpenAI
+from langchain_core.messages import HumanMessage, AIMessage
+
 from process_pdfs import process_pdfs
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
@@ -40,7 +42,14 @@ def chat():
     user_message = data.get('message')
     chat_history = data.get('history', [])
 
-    response = qa_chain({"question": user_message, "chat_history": chat_history})
+    messages = []
+    for human, ai in chat_history:
+        messages.append(HumanMessage(content=human))
+        messages.append(AIMessage(content=ai))
+
+    messages.append(HumanMessage(content=user_message))
+
+    response = qa_chain({"question": user_message, "chat_history": messages})
     answer = response['answer']
 
     # Update chat history
