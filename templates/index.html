@@ -1,66 +1,158 @@
-<!-- templates/index.html -->
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-controller="theme">
 <head>
     <meta charset="UTF-8">
-    <title>Chat with AI</title>
+    <title>Futuristic AI Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Font: Exo 2 -->
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Stimulus.js CDN -->
+    <script src="https://unpkg.com/@hotwired/stimulus@3.2.1/dist/stimulus.umd.js"></script>
+    <!-- Custom Tailwind Configuration -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'dark-blue': '#0a192f',
+                        'midnight-blue': '#112240',
+                        'neon-blue': '#64ffda',
+                    },
+                    fontFamily: {
+                        'exo': ['"Exo 2"', 'sans-serif'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-out',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: 0, transform: 'translateY(10px)' },
+                            '100%': { opacity: 1, transform: 'translateY(0)' },
+                        },
+                    },
+                },
+            },
+        }
+    </script>
     <style>
-        /* Basic styling for the chat interface */
-        body { font-family: Arial, sans-serif; }
-        #chat-window { width: 80%; margin: 20px auto; max-width: 600px; }
-        .message { padding: 10px; border-bottom: 1px solid #ccc; }
-        .user { text-align: right; }
-        .assistant { text-align: left; }
-        #user-input { width: 80%; padding: 10px; }
-        #send-button { padding: 10px; }
+        body {
+            font-family: 'Exo 2', sans-serif;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #112240;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #64ffda;
+        }
+        /* Input Focus Outline */
+        input:focus {
+            outline: none;
+            box-shadow: 0 0 5px #64ffda;
+        }
     </style>
 </head>
-<body>
-    <div id="chat-window"></div>
-    <div style="text-align: center;">
-        <input type="text" id="user-input" placeholder="Type your message here..." autocomplete="off">
-        <button id="send-button">Send</button>
+<body class="bg-dark-blue text-white flex flex-col h-screen">
+    <!-- Application Container -->
+    <div data-controller="chat" class="flex flex-col flex-1">
+        <!-- Header -->
+        <header class="bg-midnight-blue p-4 shadow-lg">
+            <h1 class="text-3xl text-neon-blue">Proprietary Documentation Friendly Chatbot</h1>
+        </header>
+        <!-- Chat Window -->
+        <main id="chat-window" class="flex-1 overflow-auto p-4">
+            <!-- Chat content will be appended here -->
+            <div class="max-w-2xl mx-auto space-y-4" data-chat-target="messages">
+                <!-- Messages will be appended here -->
+            </div>
+        </main>
+        <!-- Input Area -->
+        <footer class="bg-midnight-blue p-4">
+            <form data-action="submit->chat#sendMessage" class="flex max-w-2xl mx-auto">
+                <input type="text" id="user-input" data-chat-target="input" placeholder="Type your message..." class="flex-1 p-3 rounded-l bg-gray-800 text-white" autocomplete="off">
+                <button type="submit" class="p-3 bg-neon-blue hover:bg-teal-400 text-gray-900 rounded-r">
+                    <!-- Send Icon -->
+                    <svg class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>
+                    </svg>
+                </button>
+            </form>
+        </footer>
     </div>
 
     <script>
-        const chatWindow = document.getElementById('chat-window');
-        const userInput = document.getElementById('user-input');
-        const sendButton = document.getElementById('send-button');
-        let chatHistory = [];
+        (() => {
+            const application = Stimulus.Application.start();
 
-        sendButton.addEventListener('click', sendMessage);
-        userInput.addEventListener('keyup', function(event) {
-            if (event.key === 'Enter') {
-                sendMessage();
-            }
-        });
+            // Chat Controller
+            application.register("chat", class extends Stimulus.Controller {
+                static targets = ["input", "messages"];
 
-        function appendMessage(sender, message) {
-            const messageDiv = document.createElement('div');
-            messageDiv.classList.add('message', sender);
-            messageDiv.innerHTML = `<strong>${sender === 'user' ? 'You' : 'Assistant'}:</strong> ${message}`;
-            chatWindow.appendChild(messageDiv);
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
+                connect() {
+                    this.chatHistory = [];
+                }
 
-        function sendMessage() {
-            const message = userInput.value.trim();
-            if (message === '') return;
+                sendMessage(event) {
+                    event.preventDefault();
+                    const message = this.inputTarget.value.trim();
+                    if (message === '') return;
 
-            appendMessage('user', message);
-            userInput.value = '';
-            fetch('/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: message, history: chatHistory })
-            })
-            .then(response => response.json())
-            .then(data => {
-                appendMessage('assistant', data.answer);
-                chatHistory = data.history;
-            })
-            .catch(error => console.error('Error:', error));
-        }
+                    this.appendMessage('user', message);
+                    this.inputTarget.value = '';
+                    // Show loading indicator
+                    const loadingIndicator = this.appendMessage('assistant', 'Typing...');
+
+                    fetch('/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: message, history: this.chatHistory })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        // Remove the loading indicator
+                        loadingIndicator.remove();
+                        this.appendMessage('assistant', data.answer);
+                        this.chatHistory = data.history;
+                    })
+                    .catch(error => console.error('Error:', error));
+                }
+
+                appendMessage(sender, message) {
+                    const messageContainer = document.createElement('div');
+                    messageContainer.classList.add('flex');
+
+                    const messageDiv = document.createElement('div');
+                    messageDiv.classList.add('p-4', 'rounded', 'max-w-xl', 'break-words', 'animate-fade-in');
+
+                    if (sender === 'user') {
+                        messageContainer.classList.add('justify-end');
+                        messageDiv.classList.add('bg-neon-blue', 'text-gray-900');
+                    } else {
+                        messageContainer.classList.add('justify-start');
+                        messageDiv.classList.add('bg-gray-800');
+                    }
+
+                    messageDiv.innerHTML = `<p>${message}</p>`;
+                    messageContainer.appendChild(messageDiv);
+                    this.messagesTarget.appendChild(messageContainer);
+                    // Smooth scroll to bottom
+                    this.messagesTarget.parentElement.scrollTo({ top: this.messagesTarget.parentElement.scrollHeight, behavior: 'smooth' });
+                    return messageContainer;
+                }
+            });
+
+            // Theme Controller (Optional for future enhancements)
+            application.register("theme", class extends Stimulus.Controller {
+                connect() {
+                    // Theme-related functionalities can be added here
+                }
+            });
+        })();
     </script>
 </body>
 </html>

@@ -1,58 +1,90 @@
 # app.py
 import os
 from flask import Flask, render_template, request, jsonify
-from langchain.chains import ConversationalRetrievalChain
-from langchain.llms import OpenAI
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains.history_aware_retriever import create_history_aware_retriever
+from langchain.chains.retrieval import create_retrieval_chain
+from langchain_community.chat_models import ChatOpenAI
+from langchain_community.vectorstores import Chroma
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from process_pdfs import process_pdfs
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
 
 app = Flask(__name__)
 
-# Set your OpenAI API key
-# os.environ["OPENAI_API_KEY"] = 'your-openai-api-key'  # Replace with your key or set it as an environment variable
+pdf_directory = 'docs'
+vectorstore_path = 'vectorstore'
 
-# Process PDFs during server startup
-pdf_directory = 'docs'  # Directory containing your PDFs
-vectorstore_path = 'vectorstore'  # Directory to save the vector store
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 if not os.path.exists(vectorstore_path):
     os.makedirs(vectorstore_path)
-    vectorstore = process_pdfs(pdf_directory)
-    vectorstore.save_local(vectorstore_path)
+    vectorstore = process_pdfs(pdf_directory, embeddings, vectorstore_path)
 else:
-    embeddings = OpenAIEmbeddings()
-    vectorstore = FAISS.load_local(vectorstore_path, embeddings, allow_dangerous_deserialization=True)
+    vectorstore = Chroma(persist_directory=vectorstore_path, embedding_function=embeddings)
 
-# Initialize the Conversational Retrieval Chain
-llm = OpenAI(temperature=0)
-qa_chain = ConversationalRetrievalChain.from_llm(llm, vectorstore.as_retriever())
+llm = ChatOpenAI(model="gpt-4o", temperature=0.5)
 
-# Route for the chat interface
+contextualize_q_system_prompt = (
+    "Given a chat history and the latest user question "
+    "which might reference context in the chat history, "
+    "formulate a standalone question which can be understood "
+    "without the chat history. Do NOT answer the question, just "
+    "reformulate it if needed and otherwise return it as is."
+)
+
+contextualize_q_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", contextualize_q_system_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ]
+)
+
+qa_prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are a helpful documentation guru. You are tasked with answering questions based on the documentation."
+     "If you can't derive the answer from the documentation, just say so."
+     "\n\n"
+     "{context}"),
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+])
+
+qa_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+retriever = vectorstore.as_retriever(
+    search_type="similarity",
+    search_kwargs={"k": 3},
+)
+
+history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
+
+rag_chain = create_retrieval_chain(history_aware_retriever, qa_chain)
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# API endpoint for handling chat messages
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.get_json()
     user_message = data.get('message')
     chat_history = data.get('history', [])
 
+
+
     messages = []
     for human, ai in chat_history:
         messages.append(HumanMessage(content=human))
         messages.append(AIMessage(content=ai))
 
-    messages.append(HumanMessage(content=user_message))
 
-    response = qa_chain({"question": user_message, "chat_history": messages})
-    answer = response['answer']
+    result = rag_chain.invoke({"input": user_message, "chat_history": messages})
+    answer = result['answer']
 
-    # Update chat history
     chat_history.append((user_message, answer))
 
     return jsonify({'answer': answer, 'history': chat_history})
